@@ -1,3 +1,5 @@
+import json
+
 import math
 import os
 import argparse
@@ -12,27 +14,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.nn import init
+from torch.utils import data
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
-parser.add_argument('--nepochs', type=int, default=160)
-parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
-parser.add_argument('--lr', type=float, default=0.1)
-parser.add_argument('--weight_decay', type=float, default=5e-4)
-parser.add_argument('--batch_size', type=int, default=48)
-parser.add_argument('--test_batch_size', type=int, default=256)
-parser.add_argument('--num_channels', type=int, default=512)
-parser.add_argument('--num_blocks', type=int, default=32)
-parser.add_argument('--norm', type=str, choices=['batch', 'group'], default='group')
-
-parser.add_argument('--save', type=str, default='./experiment1')
-parser.add_argument('--debug', action='store_true')
-parser.add_argument('--gpu', type=int, default=0)
-parser.add_argument('--load_model', type=str, default='')
-# parser.add_argument('--boundary_epochs', type=int, nargs='+', default=[40, 90, 140])
+parser.add_argument('--dataset', type=str)
 args, _ = parser.parse_known_args()
 
 
@@ -109,6 +97,28 @@ class RunningAverageMeter(object):
         else:
             self.avg = self.avg * self.momentum + val * (1 - self.momentum)
         self.val = val
+
+
+class VQADataset(data.Dataset):
+    def __init__(self, dataset_path: str, mode: str = 'train'):
+        with open(os.path.join(dataset_path, 'v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode))) as questions_json:
+            with open(os.path.join(dataset_path, 'v2_mscoco_{}2014_annotations.json'.format(mode))) as annotations_json:
+                questions_dict = json.loads(questions_json.read())['questions']
+                annotations_dict = json.loads(annotations_json.read())['annotations']
+
+                dataset_dict = {}
+                for question in questions_dict:
+
+                    #dataset_dict[question['question_id']] = [question]
+                for annotation in annotations_dict:
+                    dataset_dict[annotation['question_id']].append(annotation)
+                self.dataset_dict = dataset_dict
+
+    def __len__(self) -> int:
+        return len(self.dataset_dict)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        pass
 
 
 def get_cifar10_loaders(data_aug: bool = False, batch_size: int = 32,
@@ -242,155 +252,155 @@ class LoggerWrapper(object):
 
 
 def main() -> None:
-    makedirs(args.save)
-    sys_logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
-    sys_logger.info(args)
-    sys.stdout = LoggerWrapper(sys_logger, log_err=False)
-    sys.stderr = LoggerWrapper(sys_logger, log_err=True)
-
-    if args.downsampling_method == 'conv':
-        downsampling_layers = [
-            nn.Conv2d(3, 64, 3, 1),
-            norm(64),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(64, 256, 4, 2, 1),
-            norm(256),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(256, args.num_channels, 4, 2, 1),
-        ]
-    elif args.downsampling_method == 'res':
-        downsampling_layers = [
-            nn.Conv2d(3, args.num_channels, 3, 1),
-            ResBlock(args.num_channels, args.num_channels, stride=2,
-                     downsample=conv1x1(args.num_channels, args.num_channels, 2)),
-            ResBlock(args.num_channels, args.num_channels, stride=2,
-                     downsample=conv1x1(args.num_channels, args.num_channels, 2)),
-        ]
-
-    feature_layers = [ODEBlock(ODEfunc(args.num_channels), args.tol, args.ode_solver)] if args.network == 'odenet' \
-        else [ResBlock(args.num_channels, args.num_channels)
-              for _ in range(args.num_blocks)] if args.network == 'resnet' \
-        else [RepeatBlock(NotODEfunc(args.num_channels), args.num_blocks)]
-    fc_layers = [norm(args.num_channels), nn.LeakyReLU(inplace=True),
-                 nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(args.num_channels, 10)]
-
-    model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
-    if len(args.load_model) > 0:
-        model.load_state_dict(torch.load(args.load_model)['state_dict'])
-        sys_logger.info('Loaded model from {} successfully'.format(args.load_model))
-
-    sys_logger.info(model)
-    sys_logger.info('Number of parameters: {}'.format(count_parameters(model)))
-
-    criterion = nn.CrossEntropyLoss().to(device)
-
-    train_loader, test_loader, train_eval_loader = get_cifar10_loaders(
-        args.data_aug, args.batch_size, args.test_batch_size
-    )
-    if args.nepochs <= 0:
-        del train_loader
-        model.eval()
-        with torch.no_grad():
-            train_acc = accuracy(model, train_eval_loader)
-            test_acc = accuracy(model, test_loader)
-            torch.save({'state_dict': model.state_dict(), 'args': args, 'test_acc': test_acc},
-                       os.path.join(args.save, 'model.pth'))
-            sys_logger.info(
-                "Train Acc {:.4f} | Test Acc {:.4f}".format(
-                    train_acc, test_acc
-                )
-            )
-    else:
-        del train_eval_loader
-        data_gen = inf_generator(train_loader)
-        batches_per_epoch = len(train_loader)
-
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay, nesterov=True)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=7, verbose=True)
-
-        best_acc = 0
-        train_correct = 0
-        batch_time_meter = RunningAverageMeter()
-        f_nfe_meter = RunningAverageMeter()
-        b_nfe_meter = RunningAverageMeter()
-        train_loss_meter = RunningAverageMeter()
-        end = time.time()
-
-        for itr in range(args.nepochs * batches_per_epoch):
-
-            optimizer.zero_grad()
-            x, y = data_gen.__next__()
-            x = x.to(device)
-            y = y.to(device)
-
-            logits = model(x)
-            loss = criterion(logits, y)
-            # for name, param in model.named_parameters():
-            #     if args.network == 'repeatresnet' and 'intervals' in name:
-            #         loss += args.weight_decay * param.norm(1)
-            #     else:
-            #         loss += args.weight_decay * param.norm(2)
-
-            train_loss_meter.update(loss.item())
-
-            _, predicted = torch.max(logits, dim=1)
-            train_correct += (predicted == y).sum().item()
-
-            if args.network == 'odenet':
-                nfe_forward = feature_layers[0].nfe
-                feature_layers[0].nfe = 0
-
-            loss.backward()
-            optimizer.step()
-
-            if args.network == 'odenet':
-                nfe_backward = feature_layers[0].nfe
-                feature_layers[0].nfe = 0
-
-            batch_time_meter.update(time.time() - end)
-            if args.network == 'odenet':
-                f_nfe_meter.update(nfe_forward)
-                b_nfe_meter.update(nfe_backward)
-            end = time.time()
-
-            train_acc = train_correct / (args.batch_size * batches_per_epoch)
-            if (itr + 1) % (batches_per_epoch * 4) == 0 or \
-                    (itr + 1) % batches_per_epoch == 0 and (train_acc >= 0.98 or best_acc >= 0.9):
-                train_correct = 0
-                scheduler.step(train_acc)
-                del x, y
-                model.eval()
-                with torch.no_grad():
-                    # train_acc = accuracy(model, train_eval_loader)
-                    val_acc = accuracy(model, test_loader)
-                    if val_acc > best_acc:
-                        torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
-                        best_acc = val_acc
-                    sys_logger.info(
-                        "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
-                        "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f} | Test Acc {:.4f}".format(
-                            itr // batches_per_epoch, batch_time_meter.val,
-                            batch_time_meter.avg, f_nfe_meter.avg,
-                            b_nfe_meter.avg, train_loss_meter.val,
-                            train_loss_meter.avg, train_acc, val_acc
-                        )
-                    )
-                model.train()
-            elif (itr + 1) % batches_per_epoch == 0:
-                train_acc = train_correct / (args.batch_size * batches_per_epoch)
-                scheduler.step(train_acc)
-                train_correct = 0
-                sys_logger.info(
-                    "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
-                    "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f}".format(
-                        itr // batches_per_epoch, batch_time_meter.val,
-                        batch_time_meter.avg, f_nfe_meter.avg,
-                        b_nfe_meter.avg, train_loss_meter.val,
-                        train_loss_meter.avg, train_acc
-                    )
-                )
-
-        sys_logger.info('Best test acc: {:.4f}'.format(best_acc))
+    # makedirs(args.save)
+    # sys_logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
+    # sys_logger.info(args)
+    # sys.stdout = LoggerWrapper(sys_logger, log_err=False)
+    # sys.stderr = LoggerWrapper(sys_logger, log_err=True)
+    #
+    # if args.downsampling_method == 'conv':
+    #     downsampling_layers = [
+    #         nn.Conv2d(3, 64, 3, 1),
+    #         norm(64),
+    #         nn.LeakyReLU(inplace=True),
+    #         nn.Conv2d(64, 256, 4, 2, 1),
+    #         norm(256),
+    #         nn.LeakyReLU(inplace=True),
+    #         nn.Conv2d(256, args.num_channels, 4, 2, 1),
+    #     ]
+    # elif args.downsampling_method == 'res':
+    #     downsampling_layers = [
+    #         nn.Conv2d(3, args.num_channels, 3, 1),
+    #         ResBlock(args.num_channels, args.num_channels, stride=2,
+    #                  downsample=conv1x1(args.num_channels, args.num_channels, 2)),
+    #         ResBlock(args.num_channels, args.num_channels, stride=2,
+    #                  downsample=conv1x1(args.num_channels, args.num_channels, 2)),
+    #     ]
+    #
+    # feature_layers = [ODEBlock(ODEfunc(args.num_channels), args.tol, args.ode_solver)] if args.network == 'odenet' \
+    #     else [ResBlock(args.num_channels, args.num_channels)
+    #           for _ in range(args.num_blocks)] if args.network == 'resnet' \
+    #     else [RepeatBlock(NotODEfunc(args.num_channels), args.num_blocks)]
+    # fc_layers = [norm(args.num_channels), nn.LeakyReLU(inplace=True),
+    #              nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(args.num_channels, 10)]
+    #
+    # model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
+    # if len(args.load_model) > 0:
+    #     model.load_state_dict(torch.load(args.load_model)['state_dict'])
+    #     sys_logger.info('Loaded model from {} successfully'.format(args.load_model))
+    #
+    # sys_logger.info(model)
+    # sys_logger.info('Number of parameters: {}'.format(count_parameters(model)))
+    #
+    # criterion = nn.CrossEntropyLoss().to(device)
+    #
+    # train_loader, test_loader, train_eval_loader = get_cifar10_loaders(
+    #     args.data_aug, args.batch_size, args.test_batch_size
+    # )
+    # if args.nepochs <= 0:
+    #     del train_loader
+    #     model.eval()
+    #     with torch.no_grad():
+    #         train_acc = accuracy(model, train_eval_loader)
+    #         test_acc = accuracy(model, test_loader)
+    #         torch.save({'state_dict': model.state_dict(), 'args': args, 'test_acc': test_acc},
+    #                    os.path.join(args.save, 'model.pth'))
+    #         sys_logger.info(
+    #             "Train Acc {:.4f} | Test Acc {:.4f}".format(
+    #                 train_acc, test_acc
+    #             )
+    #         )
+    # else:
+    #     del train_eval_loader
+    #     data_gen = inf_generator(train_loader)
+    #     batches_per_epoch = len(train_loader)
+    #
+    #     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay, nesterov=True)
+    #     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=7, verbose=True)
+    #
+    #     best_acc = 0
+    #     train_correct = 0
+    #     batch_time_meter = RunningAverageMeter()
+    #     f_nfe_meter = RunningAverageMeter()
+    #     b_nfe_meter = RunningAverageMeter()
+    #     train_loss_meter = RunningAverageMeter()
+    #     end = time.time()
+    #
+    #     for itr in range(args.nepochs * batches_per_epoch):
+    #
+    #         optimizer.zero_grad()
+    #         x, y = data_gen.__next__()
+    #         x = x.to(device)
+    #         y = y.to(device)
+    #
+    #         logits = model(x)
+    #         loss = criterion(logits, y)
+    #         # for name, param in model.named_parameters():
+    #         #     if args.network == 'repeatresnet' and 'intervals' in name:
+    #         #         loss += args.weight_decay * param.norm(1)
+    #         #     else:
+    #         #         loss += args.weight_decay * param.norm(2)
+    #
+    #         train_loss_meter.update(loss.item())
+    #
+    #         _, predicted = torch.max(logits, dim=1)
+    #         train_correct += (predicted == y).sum().item()
+    #
+    #         if args.network == 'odenet':
+    #             nfe_forward = feature_layers[0].nfe
+    #             feature_layers[0].nfe = 0
+    #
+    #         loss.backward()
+    #         optimizer.step()
+    #
+    #         if args.network == 'odenet':
+    #             nfe_backward = feature_layers[0].nfe
+    #             feature_layers[0].nfe = 0
+    #
+    #         batch_time_meter.update(time.time() - end)
+    #         if args.network == 'odenet':
+    #             f_nfe_meter.update(nfe_forward)
+    #             b_nfe_meter.update(nfe_backward)
+    #         end = time.time()
+    #
+    #         train_acc = train_correct / (args.batch_size * batches_per_epoch)
+    #         if (itr + 1) % (batches_per_epoch * 4) == 0 or \
+    #                 (itr + 1) % batches_per_epoch == 0 and (train_acc >= 0.98 or best_acc >= 0.9):
+    #             train_correct = 0
+    #             scheduler.step(train_acc)
+    #             del x, y
+    #             model.eval()
+    #             with torch.no_grad():
+    #                 # train_acc = accuracy(model, train_eval_loader)
+    #                 val_acc = accuracy(model, test_loader)
+    #                 if val_acc > best_acc:
+    #                     torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
+    #                     best_acc = val_acc
+    #                 sys_logger.info(
+    #                     "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
+    #                     "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f} | Test Acc {:.4f}".format(
+    #                         itr // batches_per_epoch, batch_time_meter.val,
+    #                         batch_time_meter.avg, f_nfe_meter.avg,
+    #                         b_nfe_meter.avg, train_loss_meter.val,
+    #                         train_loss_meter.avg, train_acc, val_acc
+    #                     )
+    #                 )
+    #             model.train()
+    #         elif (itr + 1) % batches_per_epoch == 0:
+    #             train_acc = train_correct / (args.batch_size * batches_per_epoch)
+    #             scheduler.step(train_acc)
+    #             train_correct = 0
+    #             sys_logger.info(
+    #                 "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
+    #                 "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f}".format(
+    #                     itr // batches_per_epoch, batch_time_meter.val,
+    #                     batch_time_meter.avg, f_nfe_meter.avg,
+    #                     b_nfe_meter.avg, train_loss_meter.val,
+    #                     train_loss_meter.avg, train_acc
+    #                 )
+    #             )
+    #
+    #     sys_logger.info('Best test acc: {:.4f}'.format(best_acc))
 
 
 if __name__ == '__main__':
