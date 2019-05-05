@@ -1,4 +1,5 @@
 import json
+from collections import Counter, defaultdict
 
 import math
 import os
@@ -12,12 +13,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from PIL import Image
 from torch import optim
 from torch.nn import init
 from torch.utils import data
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+
+import embedding
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str)
@@ -100,32 +104,52 @@ class RunningAverageMeter(object):
 
 
 class VQADataset(data.Dataset):
-    def __init__(self, dataset_path: str, mode: str = 'train'):
-        with open(os.path.join(dataset_path, 'v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode))) as questions_json:
-            with open(os.path.join(dataset_path, 'v2_mscoco_{}2014_annotations.json'.format(mode))) as annotations_json:
-                questions_dict = json.loads(questions_json.read())['questions']
-                annotations_dict = json.loads(annotations_json.read())['annotations']
 
-                dataset_dict = {}
-                for question in questions_dict:
+    def __init__(self, dataset_path: str, transform, mode: str = 'train',
+                 word_embedding_file: str = 'glove.6B.300d-relativized.txt'):
+        self.word_embeddings = embedding.read_word_embeddings(word_embedding_file)
+        answer_frequency = defaultdict(int)
+        questions_dict = \
+        json.loads(open(os.path.join(dataset_path, 'v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode))))[
+            'questions']
+        annotations_dict = \
+        json.loads(open(os.path.join(dataset_path, 'v2_mscoco_{}2014_annotations.json'.format(mode))))['annotations']
 
-                    #dataset_dict[question['question_id']] = [question]
-                for annotation in annotations_dict:
-                    dataset_dict[annotation['question_id']].append(annotation)
-                self.dataset_dict = dataset_dict
+        dataset_dict = {}
+        for question in questions_dict:
+            dataset_dict[question['question_id']] = {'question': question}
+        for annotation in annotations_dict:
+            dataset_dict[annotation['question_id']]['annotation'] = annotation
+            answer_frequency[annotation['multiple_choice_answer']] += 1
+            # for answer in annotation['answers']:
+            #     answer_frequency[answer['answer']] += 1
+        top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reversed=True)[:1000]
+        self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers.items())}
+        for _, data in dataset_dict.items():
+            data['answer_index'] = self.answer_to_idx[data['annotation']['multiple_choice_answer']]
+            data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
+                                                       for word in data['question']['question']])
+        self.dataset = [(k, v) for k, v in dataset_dict.items()]
+        self.mode = mode
+        self.dataset_path = dataset_path
+        self.transform = transform
 
     def __len__(self) -> int:
-        return len(self.dataset_dict)
+        return len(self.dataset)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        pass
+        question_id, data = self.dataset[idx]
+        image_id = '{:012d}'.format(data['image_id'])
+        year = '2015' if self.mode == 'test' else '2014'
+        with open(os.path.join(self.dataset_path, self.mode, year, image_id), 'rb') as f:
+            img = Image.open(f).convert('RGB')
+        return self.transform(img), data['question_embedding'], data['answer_idx']
 
-
-def get_cifar10_loaders(data_aug: bool = False, batch_size: int = 32,
-                        test_batch_size: int = 32) -> Tuple[DataLoader, DataLoader, DataLoader]:
+def get_loaders(data_aug: bool = False, batch_size: int = 32,
+                test_batch_size: int = 32) -> Tuple[DataLoader, DataLoader]:
     transform_train = transforms.Compose([
         transforms.RandomHorizontalFlip(),
-        transforms.RandomCrop(32, padding=4),
+        transforms.RandomCrop(256, padding=4),
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ]) if data_aug else transforms.Compose([
@@ -252,155 +276,157 @@ class LoggerWrapper(object):
 
 
 def main() -> None:
-    # makedirs(args.save)
-    # sys_logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
-    # sys_logger.info(args)
-    # sys.stdout = LoggerWrapper(sys_logger, log_err=False)
-    # sys.stderr = LoggerWrapper(sys_logger, log_err=True)
-    #
-    # if args.downsampling_method == 'conv':
-    #     downsampling_layers = [
-    #         nn.Conv2d(3, 64, 3, 1),
-    #         norm(64),
-    #         nn.LeakyReLU(inplace=True),
-    #         nn.Conv2d(64, 256, 4, 2, 1),
-    #         norm(256),
-    #         nn.LeakyReLU(inplace=True),
-    #         nn.Conv2d(256, args.num_channels, 4, 2, 1),
-    #     ]
-    # elif args.downsampling_method == 'res':
-    #     downsampling_layers = [
-    #         nn.Conv2d(3, args.num_channels, 3, 1),
-    #         ResBlock(args.num_channels, args.num_channels, stride=2,
-    #                  downsample=conv1x1(args.num_channels, args.num_channels, 2)),
-    #         ResBlock(args.num_channels, args.num_channels, stride=2,
-    #                  downsample=conv1x1(args.num_channels, args.num_channels, 2)),
-    #     ]
-    #
-    # feature_layers = [ODEBlock(ODEfunc(args.num_channels), args.tol, args.ode_solver)] if args.network == 'odenet' \
-    #     else [ResBlock(args.num_channels, args.num_channels)
-    #           for _ in range(args.num_blocks)] if args.network == 'resnet' \
-    #     else [RepeatBlock(NotODEfunc(args.num_channels), args.num_blocks)]
-    # fc_layers = [norm(args.num_channels), nn.LeakyReLU(inplace=True),
-    #              nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(args.num_channels, 10)]
-    #
-    # model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
-    # if len(args.load_model) > 0:
-    #     model.load_state_dict(torch.load(args.load_model)['state_dict'])
-    #     sys_logger.info('Loaded model from {} successfully'.format(args.load_model))
-    #
-    # sys_logger.info(model)
-    # sys_logger.info('Number of parameters: {}'.format(count_parameters(model)))
-    #
-    # criterion = nn.CrossEntropyLoss().to(device)
-    #
-    # train_loader, test_loader, train_eval_loader = get_cifar10_loaders(
-    #     args.data_aug, args.batch_size, args.test_batch_size
-    # )
-    # if args.nepochs <= 0:
-    #     del train_loader
-    #     model.eval()
-    #     with torch.no_grad():
-    #         train_acc = accuracy(model, train_eval_loader)
-    #         test_acc = accuracy(model, test_loader)
-    #         torch.save({'state_dict': model.state_dict(), 'args': args, 'test_acc': test_acc},
-    #                    os.path.join(args.save, 'model.pth'))
-    #         sys_logger.info(
-    #             "Train Acc {:.4f} | Test Acc {:.4f}".format(
-    #                 train_acc, test_acc
-    #             )
-    #         )
-    # else:
-    #     del train_eval_loader
-    #     data_gen = inf_generator(train_loader)
-    #     batches_per_epoch = len(train_loader)
-    #
-    #     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay, nesterov=True)
-    #     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=7, verbose=True)
-    #
-    #     best_acc = 0
-    #     train_correct = 0
-    #     batch_time_meter = RunningAverageMeter()
-    #     f_nfe_meter = RunningAverageMeter()
-    #     b_nfe_meter = RunningAverageMeter()
-    #     train_loss_meter = RunningAverageMeter()
-    #     end = time.time()
-    #
-    #     for itr in range(args.nepochs * batches_per_epoch):
-    #
-    #         optimizer.zero_grad()
-    #         x, y = data_gen.__next__()
-    #         x = x.to(device)
-    #         y = y.to(device)
-    #
-    #         logits = model(x)
-    #         loss = criterion(logits, y)
-    #         # for name, param in model.named_parameters():
-    #         #     if args.network == 'repeatresnet' and 'intervals' in name:
-    #         #         loss += args.weight_decay * param.norm(1)
-    #         #     else:
-    #         #         loss += args.weight_decay * param.norm(2)
-    #
-    #         train_loss_meter.update(loss.item())
-    #
-    #         _, predicted = torch.max(logits, dim=1)
-    #         train_correct += (predicted == y).sum().item()
-    #
-    #         if args.network == 'odenet':
-    #             nfe_forward = feature_layers[0].nfe
-    #             feature_layers[0].nfe = 0
-    #
-    #         loss.backward()
-    #         optimizer.step()
-    #
-    #         if args.network == 'odenet':
-    #             nfe_backward = feature_layers[0].nfe
-    #             feature_layers[0].nfe = 0
-    #
-    #         batch_time_meter.update(time.time() - end)
-    #         if args.network == 'odenet':
-    #             f_nfe_meter.update(nfe_forward)
-    #             b_nfe_meter.update(nfe_backward)
-    #         end = time.time()
-    #
-    #         train_acc = train_correct / (args.batch_size * batches_per_epoch)
-    #         if (itr + 1) % (batches_per_epoch * 4) == 0 or \
-    #                 (itr + 1) % batches_per_epoch == 0 and (train_acc >= 0.98 or best_acc >= 0.9):
-    #             train_correct = 0
-    #             scheduler.step(train_acc)
-    #             del x, y
-    #             model.eval()
-    #             with torch.no_grad():
-    #                 # train_acc = accuracy(model, train_eval_loader)
-    #                 val_acc = accuracy(model, test_loader)
-    #                 if val_acc > best_acc:
-    #                     torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
-    #                     best_acc = val_acc
-    #                 sys_logger.info(
-    #                     "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
-    #                     "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f} | Test Acc {:.4f}".format(
-    #                         itr // batches_per_epoch, batch_time_meter.val,
-    #                         batch_time_meter.avg, f_nfe_meter.avg,
-    #                         b_nfe_meter.avg, train_loss_meter.val,
-    #                         train_loss_meter.avg, train_acc, val_acc
-    #                     )
-    #                 )
-    #             model.train()
-    #         elif (itr + 1) % batches_per_epoch == 0:
-    #             train_acc = train_correct / (args.batch_size * batches_per_epoch)
-    #             scheduler.step(train_acc)
-    #             train_correct = 0
-    #             sys_logger.info(
-    #                 "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
-    #                 "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f}".format(
-    #                     itr // batches_per_epoch, batch_time_meter.val,
-    #                     batch_time_meter.avg, f_nfe_meter.avg,
-    #                     b_nfe_meter.avg, train_loss_meter.val,
-    #                     train_loss_meter.avg, train_acc
-    #                 )
-    #             )
-    #
-    #     sys_logger.info('Best test acc: {:.4f}'.format(best_acc))
+
+
+# makedirs(args.save)
+# sys_logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
+# sys_logger.info(args)
+# sys.stdout = LoggerWrapper(sys_logger, log_err=False)
+# sys.stderr = LoggerWrapper(sys_logger, log_err=True)
+#
+# if args.downsampling_method == 'conv':
+#     downsampling_layers = [
+#         nn.Conv2d(3, 64, 3, 1),
+#         norm(64),
+#         nn.LeakyReLU(inplace=True),
+#         nn.Conv2d(64, 256, 4, 2, 1),
+#         norm(256),
+#         nn.LeakyReLU(inplace=True),
+#         nn.Conv2d(256, args.num_channels, 4, 2, 1),
+#     ]
+# elif args.downsampling_method == 'res':
+#     downsampling_layers = [
+#         nn.Conv2d(3, args.num_channels, 3, 1),
+#         ResBlock(args.num_channels, args.num_channels, stride=2,
+#                  downsample=conv1x1(args.num_channels, args.num_channels, 2)),
+#         ResBlock(args.num_channels, args.num_channels, stride=2,
+#                  downsample=conv1x1(args.num_channels, args.num_channels, 2)),
+#     ]
+#
+# feature_layers = [ODEBlock(ODEfunc(args.num_channels), args.tol, args.ode_solver)] if args.network == 'odenet' \
+#     else [ResBlock(args.num_channels, args.num_channels)
+#           for _ in range(args.num_blocks)] if args.network == 'resnet' \
+#     else [RepeatBlock(NotODEfunc(args.num_channels), args.num_blocks)]
+# fc_layers = [norm(args.num_channels), nn.LeakyReLU(inplace=True),
+#              nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(args.num_channels, 10)]
+#
+# model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
+# if len(args.load_model) > 0:
+#     model.load_state_dict(torch.load(args.load_model)['state_dict'])
+#     sys_logger.info('Loaded model from {} successfully'.format(args.load_model))
+#
+# sys_logger.info(model)
+# sys_logger.info('Number of parameters: {}'.format(count_parameters(model)))
+#
+# criterion = nn.CrossEntropyLoss().to(device)
+#
+# train_loader, test_loader, train_eval_loader = get_cifar10_loaders(
+#     args.data_aug, args.batch_size, args.test_batch_size
+# )
+# if args.nepochs <= 0:
+#     del train_loader
+#     model.eval()
+#     with torch.no_grad():
+#         train_acc = accuracy(model, train_eval_loader)
+#         test_acc = accuracy(model, test_loader)
+#         torch.save({'state_dict': model.state_dict(), 'args': args, 'test_acc': test_acc},
+#                    os.path.join(args.save, 'model.pth'))
+#         sys_logger.info(
+#             "Train Acc {:.4f} | Test Acc {:.4f}".format(
+#                 train_acc, test_acc
+#             )
+#         )
+# else:
+#     del train_eval_loader
+#     data_gen = inf_generator(train_loader)
+#     batches_per_epoch = len(train_loader)
+#
+#     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay, nesterov=True)
+#     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=7, verbose=True)
+#
+#     best_acc = 0
+#     train_correct = 0
+#     batch_time_meter = RunningAverageMeter()
+#     f_nfe_meter = RunningAverageMeter()
+#     b_nfe_meter = RunningAverageMeter()
+#     train_loss_meter = RunningAverageMeter()
+#     end = time.time()
+#
+#     for itr in range(args.nepochs * batches_per_epoch):
+#
+#         optimizer.zero_grad()
+#         x, y = data_gen.__next__()
+#         x = x.to(device)
+#         y = y.to(device)
+#
+#         logits = model(x)
+#         loss = criterion(logits, y)
+#         # for name, param in model.named_parameters():
+#         #     if args.network == 'repeatresnet' and 'intervals' in name:
+#         #         loss += args.weight_decay * param.norm(1)
+#         #     else:
+#         #         loss += args.weight_decay * param.norm(2)
+#
+#         train_loss_meter.update(loss.item())
+#
+#         _, predicted = torch.max(logits, dim=1)
+#         train_correct += (predicted == y).sum().item()
+#
+#         if args.network == 'odenet':
+#             nfe_forward = feature_layers[0].nfe
+#             feature_layers[0].nfe = 0
+#
+#         loss.backward()
+#         optimizer.step()
+#
+#         if args.network == 'odenet':
+#             nfe_backward = feature_layers[0].nfe
+#             feature_layers[0].nfe = 0
+#
+#         batch_time_meter.update(time.time() - end)
+#         if args.network == 'odenet':
+#             f_nfe_meter.update(nfe_forward)
+#             b_nfe_meter.update(nfe_backward)
+#         end = time.time()
+#
+#         train_acc = train_correct / (args.batch_size * batches_per_epoch)
+#         if (itr + 1) % (batches_per_epoch * 4) == 0 or \
+#                 (itr + 1) % batches_per_epoch == 0 and (train_acc >= 0.98 or best_acc >= 0.9):
+#             train_correct = 0
+#             scheduler.step(train_acc)
+#             del x, y
+#             model.eval()
+#             with torch.no_grad():
+#                 # train_acc = accuracy(model, train_eval_loader)
+#                 val_acc = accuracy(model, test_loader)
+#                 if val_acc > best_acc:
+#                     torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
+#                     best_acc = val_acc
+#                 sys_logger.info(
+#                     "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
+#                     "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f} | Test Acc {:.4f}".format(
+#                         itr // batches_per_epoch, batch_time_meter.val,
+#                         batch_time_meter.avg, f_nfe_meter.avg,
+#                         b_nfe_meter.avg, train_loss_meter.val,
+#                         train_loss_meter.avg, train_acc, val_acc
+#                     )
+#                 )
+#             model.train()
+#         elif (itr + 1) % batches_per_epoch == 0:
+#             train_acc = train_correct / (args.batch_size * batches_per_epoch)
+#             scheduler.step(train_acc)
+#             train_correct = 0
+#             sys_logger.info(
+#                 "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
+#                 "Train Loss {:.6f} ({:.6f}) | Train Acc {:.4f}".format(
+#                     itr // batches_per_epoch, batch_time_meter.val,
+#                     batch_time_meter.avg, f_nfe_meter.avg,
+#                     b_nfe_meter.avg, train_loss_meter.val,
+#                     train_loss_meter.avg, train_acc
+#                 )
+#             )
+#
+#     sys_logger.info('Best test acc: {:.4f}'.format(best_acc))
 
 
 if __name__ == '__main__':

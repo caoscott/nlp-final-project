@@ -17,7 +17,7 @@ class FeedForward(nn.Module):
         self.CNN = torchvision.models.resnet18(pretrained=True)
         self.CNN.fc = PassModule()
         self.RNN = nn.LSTM(embedding_size, embedding_size, batch_first=True)
-        self.Linear = nn.Linear(embedding_size, 3)
+        self.Linear = nn.Linear(embedding_size, 1000)
 
     def forward(self, image, question):
         image_out = self.CNN(image)
