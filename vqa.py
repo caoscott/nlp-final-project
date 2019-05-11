@@ -114,9 +114,9 @@ class VQADataset(data.Dataset):
         with open(os.path.join(self.dataset_path, image_name), 'rb') as f:
             img = Image.open(f).convert('RGB')
 
-        img = torch.unsqueeze(self.transform(img), 0)
-        question = torch.unsqueeze(question_embedding, 0)
-        answer =  torch.unsqueeze(torch.tensor(data['answer_index']), 0)
+        img = self.transform(img)
+        question = question_embedding
+        answer =  torch.tensor(data['answer_index'])
         print(img.shape, question.shape, answer.shape)
         return img, question, answer
 
