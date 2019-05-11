@@ -76,7 +76,8 @@ class VQADataset(data.Dataset):
         dataset_dict = {}
         while questions_dict:
             question = questions_dict.pop()
-            dataset_dict[question['question_id']] = {'question': copy.deepcopy(question['question'])}
+            dataset_dict[question['question_id']] = {'question': copy.deepcopy(question['question']), 
+                                                        'image_id': copy.deepcopy(question['image_id'])}
         while annotations_dict:
             annotation = annotations_dict.pop()
             dataset_dict[annotation['question_id']]['multiple_choice_answer'] = copy.deepcopy(annotation['multiple_choice_answer'])
