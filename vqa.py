@@ -113,7 +113,8 @@ class VQADataset(data.Dataset):
         image_name = "COCO_" + self.mode + year + "_" + image_id + ".jpg"
         with open(os.path.join(self.dataset_path, image_name), 'rb') as f:
             img = Image.open(f).convert('RGB')
-        return self.transform(img), question_embedding, torch.tensor(data['answer_index'])
+        return torch.unsqueeze(self.transform(img), 0), torch.unsqueeze(question_embedding, 0), 
+                    torch.unsqueeze(torch.tensor(data['answer_index']), 0)
 
 def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
                 test_batch_size: int = 32) -> Tuple[DataLoader, DataLoader]:
