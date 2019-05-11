@@ -79,10 +79,12 @@ class VQADataset(data.Dataset):
             dataset_dict[annotation['question_id']]['annotation'] = annotation
             answer_frequency[annotation['multiple_choice_answer']] += 1
         print("Combined questions and answers.")
+        del questions_dict, annotations_dict
 
         top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reverse=True)[:1000]
         print("Done sorting.")
         self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers)}
+        del top_answers, answer_frequency
         self.dataset = []
         for k, data in dataset_dict.items():
             if data['annotation']['multiple_choice_answer'] in self.answer_to_idx:
