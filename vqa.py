@@ -94,8 +94,6 @@ class VQADataset(data.Dataset):
             k, data = dataset_dict.popitem()
             if data['multiple_choice_answer'] in self.answer_to_idx:
                 data['answer_index'] = self.answer_to_idx[data['multiple_choice_answer']]
-                data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
-                                                           for word in data['question']])
                 self.dataset.append((k, data))
 
         del dataset_dict
