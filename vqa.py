@@ -78,7 +78,7 @@ class VQADataset(data.Dataset):
             dataset_dict[annotation['question_id']]['annotation'] = annotation
             answer_frequency[annotation['multiple_choice_answer']] += 1
 
-        top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reversed=True)[:1000]
+        top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reverse=True)[:1000]
         self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers.items())}
         for _, data in dataset_dict.items():
             data['answer_index'] = self.answer_to_idx[data['annotation']['multiple_choice_answer']]
@@ -120,7 +120,7 @@ def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
     ])
 
     word_embedding_file = 'glove.6B.300d-relativized.txt'
-    vqa_train = VQADataset(train_path, transform_train, 'train',  word_embedding_file)
+    vqa_train = VQADataset(train_path, transform_train, 'train', word_embedding_file)
     vqa_test = VQADataset(test_path, transform_test, 'val', word_embedding_file)
 
     train_loader = DataLoader(
