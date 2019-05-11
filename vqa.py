@@ -70,6 +70,7 @@ class VQADataset(data.Dataset):
         json.loads(open('v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode)).read())['questions']
         annotations_dict = \
         json.loads(open('v2_mscoco_{}2014_annotations.json'.format(mode)).read())['annotations']
+        print("JSON loaded.")
 
         dataset_dict = {}
         for question in questions_dict:
@@ -77,8 +78,10 @@ class VQADataset(data.Dataset):
         for annotation in annotations_dict:
             dataset_dict[annotation['question_id']]['annotation'] = annotation
             answer_frequency[annotation['multiple_choice_answer']] += 1
+        print("Combined questions and answers.")
 
         top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reverse=True)[:1000]
+        print("Done sorting.")
         self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers)}
         self.dataset = []
         for k, data in dataset_dict.items():
@@ -87,7 +90,7 @@ class VQADataset(data.Dataset):
                 data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
                                                            for word in data['question']['question']])
                 self.dataset.append((k, data))
-                
+
         self.mode = mode
         self.dataset_path = dataset_path
         self.transform = transform
