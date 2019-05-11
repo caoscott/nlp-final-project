@@ -80,11 +80,14 @@ class VQADataset(data.Dataset):
 
         top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reverse=True)[:1000]
         self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers)}
-        for _, data in dataset_dict.items():
-            data['answer_index'] = self.answer_to_idx[data['annotation']['multiple_choice_answer']]
-            data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
-                                                       for word in data['question']['question']])
-        self.dataset = [(k, v) for k, v in dataset_dict.items()]
+        self.dataset = []
+        for k, data in dataset_dict.items():
+            if data['annotation']['multiple_choice_answer'] in self.answer_to_idx:
+                data['answer_index'] = self.answer_to_idx[data['annotation']['multiple_choice_answer']]
+                data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
+                                                           for word in data['question']['question']])
+                self.dataset.append((k, data))
+                
         self.mode = mode
         self.dataset_path = dataset_path
         self.transform = transform
