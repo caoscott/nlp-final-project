@@ -106,11 +106,12 @@ class VQADataset(data.Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         question_id, data = self.dataset[idx]
+        question_embedding = torch.tensor([self.word_embeddings.get_embedding(word) for word in data['question']])
         image_id = '{:012d}'.format(data['image_id'])
         year = '2015' if self.mode == 'test' else '2014'
         with open(os.path.join(self.dataset_path, self.mode, year, image_id), 'rb') as f:
             img = Image.open(f).convert('RGB')
-        return self.transform(img), data['question_embedding'], torch.tensor(data['answer_index'])
+        return self.transform(img), question_embedding, torch.tensor(data['answer_index'])
 
 def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
                 test_batch_size: int = 32) -> Tuple[DataLoader, DataLoader]:
