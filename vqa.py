@@ -79,7 +79,7 @@ class VQADataset(data.Dataset):
             answer_frequency[annotation['multiple_choice_answer']] += 1
 
         top_answers = sorted([(v, k) for k, v in answer_frequency.items()], reverse=True)[:1000]
-        self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers.items())}
+        self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers)}
         for _, data in dataset_dict.items():
             data['answer_index'] = self.answer_to_idx[data['annotation']['multiple_choice_answer']]
             data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
