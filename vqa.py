@@ -67,10 +67,10 @@ class VQADataset(data.Dataset):
         self.word_embeddings = embedding.read_word_embeddings(word_embedding_file)
         answer_frequency = defaultdict(int)
         questions_dict = \
-        json.loads(open('v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode)))[
+        json.loads(open('v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode)).read())[
             'questions']
         annotations_dict = \
-        json.loads(open('v2_mscoco_{}2014_annotations.json'.format(mode)))['annotations']
+        json.loads(open('v2_mscoco_{}2014_annotations.json'.format(mode)).read())['annotations']
 
         dataset_dict = {}
         for question in questions_dict:
