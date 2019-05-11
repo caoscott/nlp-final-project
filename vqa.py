@@ -7,6 +7,7 @@ import argparse
 import logging
 import sys
 import time
+import copy
 from typing import List, Callable, Union, Tuple, Iterable, Generator
 
 import numpy as np
@@ -73,10 +74,12 @@ class VQADataset(data.Dataset):
         print("JSON loaded.")
 
         dataset_dict = {}
-        for question in questions_dict:
-            dataset_dict[question['question_id']] = {'question': question}
-        for annotation in annotations_dict:
-            dataset_dict[annotation['question_id']]['annotation'] = annotation
+        while questions_dict:
+            question = questions_dict.pop()
+            dataset_dict[question['question_id']] = {'question': copy.deepcopy(question['question'])}
+        while annotations_dict:
+            annotation = annotations_dict.pop()
+            dataset_dict[annotation['question_id']]['multiple_choice_answer'] = copy.deepcopy(annotation['multiple_choice_answer'])
             answer_frequency[annotation['multiple_choice_answer']] += 1
         print("Combined questions and answers.")
         del questions_dict, annotations_dict
@@ -86,13 +89,16 @@ class VQADataset(data.Dataset):
         self.answer_to_idx = {ans: idx for idx, (_, ans) in enumerate(top_answers)}
         del top_answers, answer_frequency
         self.dataset = []
-        for k, data in dataset_dict.items():
-            if data['annotation']['multiple_choice_answer'] in self.answer_to_idx:
-                data['answer_index'] = self.answer_to_idx[data['annotation']['multiple_choice_answer']]
+        
+        while dataset_dict:
+            k, data = dataset_dict.popitem()
+            if data['multiple_choice_answer'] in self.answer_to_idx:
+                data['answer_index'] = self.answer_to_idx[data['multiple_choice_answer']]
                 data['question_embedding'] = torch.tensor([self.word_embeddings.get_embedding(word)
-                                                           for word in data['question']['question']])
+                                                           for word in data['question']])
                 self.dataset.append((k, data))
 
+        del dataset_dict
         self.mode = mode
         self.dataset_path = dataset_path
         self.transform = transform
