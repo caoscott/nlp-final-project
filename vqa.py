@@ -110,7 +110,8 @@ class VQADataset(data.Dataset):
         question_embedding = torch.tensor([self.word_embeddings.get_embedding(word) for word in data['question']])
         image_id = '{:012d}'.format(data['image_id'])
         year = '2015' if self.mode == 'test' else '2014'
-        with open(os.path.join(self.dataset_path, self.mode, year, image_id), 'rb') as f:
+        image_name = "COCO_" + self.mode + year + "_" + image_id + ".jpg"
+        with open(os.path.join(self.dataset_path, image_name), 'rb') as f:
             img = Image.open(f).convert('RGB')
         return self.transform(img), question_embedding, torch.tensor(data['answer_index'])
 
