@@ -13,10 +13,10 @@ class PassModule(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self):
         super(FeedForward, self).__init__()
-        embedding_size = 512
+        embedding_size = 300
         self.CNN = torchvision.models.resnet18(pretrained=True)
         self.CNN.fc = PassModule()
-        self.RNN = nn.LSTM(embedding_size, embedding_size, batch_first=True)
+        self.RNN = nn.LSTM(embedding_size, 512, batch_first=True)
         self.Linear = nn.Linear(embedding_size, 1000)
 
     def forward(self, image, question):
