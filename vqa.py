@@ -107,7 +107,7 @@ class VQADataset(data.Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         question_id, data = self.dataset[idx]
-        question_embedding = torch.tensor([self.word_embeddings.get_embedding(word) for word in data['question']])
+        question_embedding = torch.tensor([self.word_embeddings.get_embedding(word) for word in data['question']], dtype=torch.float)
         image_id = '{:012d}'.format(data['image_id'])
         year = '2015' if self.mode == 'test' else '2014'
         image_name = "COCO_" + self.mode + year + "_" + image_id + ".jpg"
