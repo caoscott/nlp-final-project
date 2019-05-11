@@ -101,7 +101,7 @@ class VQADataset(data.Dataset):
             img = Image.open(f).convert('RGB')
         return self.transform(img), data['question_embedding'], torch.tensor(data['answer_index'])
 
-def get_loaders(data_aug: bool = False, batch_size: int = 32,
+def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
                 test_batch_size: int = 32) -> Tuple[DataLoader, DataLoader]:
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -120,11 +120,9 @@ def get_loaders(data_aug: bool = False, batch_size: int = 32,
         normalize,
     ])
 
-    train_path = ''
-    test_path = ''
     word_embedding_file = 'glove.6B.300d-relativized.txt'
     vqa_train = VQADataset(train_path, transform_train, 'train',  word_embedding_file)
-    vqa_test = VQADataset(test_path, transform_test, 'test', word_embedding_file)
+    vqa_test = VQADataset(test_path, transform_test, 'val', word_embedding_file)
 
     train_loader = DataLoader(
         vqa_train,
@@ -132,7 +130,7 @@ def get_loaders(data_aug: bool = False, batch_size: int = 32,
     )
 
     test_loader = DataLoader(
-        transform_test,
+        vqa_test,
         batch_size=test_batch_size, shuffle=False, num_workers=2, drop_last=False
     )
 
@@ -155,6 +153,8 @@ def count_parameters(model: nn.Module) -> int:
 
 def main() -> None:
     pass
+
+
 
 if __name__ == '__main__':
     device = torch.device('cuda:' + str(args.gpu) if args.gpu >= 0 and torch.cuda.is_available() else 'cpu')
