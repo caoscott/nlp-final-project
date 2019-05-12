@@ -114,6 +114,8 @@ class VQADataset(data.Dataset):
         with open(os.path.join(self.dataset_path, image_name), 'rb') as f:
             img = Image.open(f).convert('RGB')
 
+        question_embedding = F.pad(question_embedding, pad=(0, 0, 60-question_embedding.shape[0], 0))
+        print(question_embedding.shape)
         return self.transform(img), question_embedding, torch.tensor(data['answer_index'])
 
 def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
