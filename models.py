@@ -1,5 +1,6 @@
 import torchvision
 from torch import nn
+import torch
 
 
 class PassModule(nn.Module):
