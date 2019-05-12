@@ -112,7 +112,8 @@ class VQADataset(data.Dataset):
         return self.transform(img), question_embedding, torch.tensor(data['answer_index'])
 
 def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
-                test_batch_size: int = 32) -> Tuple[DataLoader, DataLoader]:
+        test_batch_size: int = 32, num_train_workers: int = 6,
+        num_test_workers: int = 8) -> Tuple[DataLoader, DataLoader]:
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
@@ -137,18 +138,20 @@ def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
 
     train_loader = DataLoader(
         vqa_train,
-        batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True
+        batch_size=batch_size, shuffle=True, 
+        num_workers=num_train_workers, drop_last=True
     )
 
     test_loader = DataLoader(
         vqa_test,
-        batch_size=test_batch_size, shuffle=False, num_workers=2, drop_last=False
+        batch_size=test_batch_size, shuffle=False, 
+        num_workers=num_test_workers, drop_last=False
     )
 
     return train_loader, test_loader
 
 
-def accuracy(model: nn.Module, dataset_loader: DataLoader) -> float:
+def accuracy(model: nn.Module, dataset_loader: DataLoader, device) -> float:
     total_correct = 0
     for x, y in dataset_loader:
         x = x.to(device)
