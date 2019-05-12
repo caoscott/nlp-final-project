@@ -20,7 +20,7 @@ class FeedForward(nn.Module):
         for params in self.CNN.parameters():
             params.requires_grad = False
         self.CNN.fc = PassModule()
-        self.RNN = nn.LSTM(embedding_size, 512, batch_first=True)
+        self.RNN = nn.LSTM(embedding_size, 512, batch_first=True, bidirectional=True)
         self.Linear = nn.Linear(512, 1000)
 
     def forward(self, image, question):
