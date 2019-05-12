@@ -15,8 +15,8 @@ class FeedForward(nn.Module):
         super(FeedForward, self).__init__()
         embedding_size = 300
         self.CNN = torchvision.models.resnet18(pretrained=True)
-        CNN.eval()
-        for params in CNN.parameters():
+        self.CNN.eval()
+        for params in self.CNN.parameters():
             params.requires_grad = False
         self.CNN.fc = PassModule()
         self.RNN = nn.LSTM(embedding_size, 512, batch_first=True)
