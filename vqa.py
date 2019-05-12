@@ -25,12 +25,6 @@ import torchvision.transforms as transforms
 import embedding
 
 
-def norm(dim: int) -> nn.Module:
-    if args.norm == 'batch':
-        return nn.BatchNorm2d(dim)
-    return nn.GroupNorm(min(32, dim), dim)
-
-
 class Flatten(nn.Module):
 
     def __init__(self) -> None:
@@ -63,9 +57,9 @@ class RunningAverageMeter(object):
 
 class VQADataset(data.Dataset):
 
-    def __init__(self, dataset_path: str, transform, mode: str = 'train',
-                 word_embedding_file: str = 'glove.6B.300d-relativized.txt'):
-        self.word_embeddings = embedding.read_word_embeddings(word_embedding_file)
+    def __init__(self, dataset_path: str, transform, 
+            word_embeddings: embedding.WordEmbeddings, mode: str = 'train'):
+        self.word_embeddings = word_embeddings
         answer_frequency = defaultdict(int)
         questions_dict = \
         json.loads(open('v2_OpenEnded_mscoco_{}2014_questions.json'.format(mode)).read())['questions']
@@ -137,8 +131,9 @@ def get_loaders(train_path: str, test_path:str, batch_size: int = 32,
     ])
 
     word_embedding_file = 'glove.6B.300d-relativized.txt'
-    vqa_train = VQADataset(train_path, transform_train, 'train', word_embedding_file)
-    vqa_test = VQADataset(test_path, transform_test, 'val', word_embedding_file)
+    word_embeddings = embedding.read_word_embeddings(word_embedding_file)
+    vqa_train = VQADataset(train_path, transform_train, word_embeddings, 'train')
+    vqa_test = VQADataset(test_path, transform_test, word_embeddings, 'val')
 
     train_loader = DataLoader(
         vqa_train,
@@ -166,12 +161,3 @@ def accuracy(model: nn.Module, dataset_loader: DataLoader) -> float:
 def count_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-
-def main() -> None:
-    pass
-
-
-
-if __name__ == '__main__':
-    device = torch.device('cuda:' + str(args.gpu) if args.gpu >= 0 and torch.cuda.is_available() else 'cpu')
-    main()
