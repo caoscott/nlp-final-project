@@ -21,6 +21,7 @@ from torch.utils import data
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import cv2
 
 import embedding
 
@@ -106,7 +107,7 @@ class VQADataset(data.Dataset):
         year = '2015' if self.mode == 'test' else '2014'
         image_name = "COCO_" + self.mode + year + "_" + image_id + ".jpg"
         with open(os.path.join(self.dataset_path, image_name), 'rb') as f:
-            img = Image.open(f).convert('RGB')
+            img = cv2.cvtColor(cv2.imread(f), cv2.COLOR_BGR2RGB)
 
         question_embedding = F.pad(question_embedding, pad=(0, 0, 60-question_embedding.shape[0], 0))
         return self.transform(img), question_embedding, torch.tensor(data['answer_index'])
