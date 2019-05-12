@@ -25,7 +25,7 @@ class FeedForward(nn.Module):
 
     def forward(self, image, question):
         image_out = self.CNN(image)
-        _, (question_out, 0) = self.RNN(question)
+        _, (question_out, _) = self.RNN(question)
         question_out = torch.squeeze(question_out, 0)
         #rnn_out = question_out[:, -1, :]
         print(question_out.shape)
