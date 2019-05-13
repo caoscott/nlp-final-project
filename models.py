@@ -32,7 +32,7 @@ class FeedForward(nn.Module):
         #print(forward_output.shape, backward_output.shape)
         #rnn_out = question_out[-1, :, :512] + question_out[-1, :, 512:]
         #print(rnn_out.shape)
-        question_out.view(question_out.shape[0], question_out.shape[2])
+        #question_out.view(question_out.shape[0], question_out.shape[2])
         out = image_out + question_out
         return self.Linear(out)
 
